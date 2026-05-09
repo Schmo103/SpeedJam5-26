@@ -5,14 +5,16 @@ extends Node2D
 # ---------------------------------------------------------
 const START_ORGANISMS := 100
 const MAX_ORGANISMS := 100
-const MAX_TENTACLES_PER_ORG := 5
+const MAX_TENTACLES_PER_ORG := 10
 
 const TENTACLE_SPEED := 1
-const MAX_TENTACLE_LENGTH := 110.0
+var MAX_TENTACLE_LENGTH := 10.0
 const TIP_COLLISION_RADIUS := 10.0
 
 var organisms = []
 var frame = 0
+
+var tentacle_timer = 0.0
 
 # ---------------------------------------------------------
 # BLOB
@@ -50,7 +52,7 @@ func _spawn_initial():
 			"team": i,
 			"tentacles": [],
 			"dead": false,
-			"life": randi_range(300, 350)
+			"life": randi_range(600000, 6000050)
 		})
 
 
@@ -60,12 +62,22 @@ func _spawn_initial():
 func _process(delta):
 	frame += 1
 	_update_lifespans()
-	_update_blob()
-	_update_blob_tentacles()
+	_update_tentacle_growth_timer(delta)
 	_update_tentacles()
 	_update_explosions()
 	_cleanup()
 	queue_redraw()
+
+
+# ---------------------------------------------------------
+# TENTACLE GROWTH TIMER
+# ---------------------------------------------------------
+func _update_tentacle_growth_timer(delta):
+	tentacle_timer += delta
+	if tentacle_timer >= 1.0:
+		tentacle_timer = 0.0
+		MAX_TENTACLE_LENGTH += 15.0
+		print("Tentacle max length increased to: ", MAX_TENTACLE_LENGTH)
 
 
 # ---------------------------------------------------------
@@ -88,102 +100,14 @@ func _update_lifespans():
 
 
 # ---------------------------------------------------------
-# BLOB UPDATE (CHASE ADDED)
-# ---------------------------------------------------------
-func _update_blob():
-	# random wiggle
-	if randi() % 40 == 0:
-		var angle = randf() * TAU
-		blob_dir = Vector2(cos(angle), sin(angle))
-
-	# --- CHASE NEAREST ORGANISM ---
-	var nearest = null
-	var nearest_dist = INF
-
-	for org in organisms:
-		if org["dead"]:
-			continue
-		var d = blob_pos.distance_to(org["pos"])
-		if d < nearest_dist:
-			nearest_dist = d
-			nearest = org
-
-	if nearest != null:
-		var desired = (nearest["pos"] - blob_pos).normalized()
-		blob_dir = (blob_dir * 0.85 + desired * 0.15).normalized()
-
-	# move
-	blob_pos += blob_dir * blob_speed
-
-	# bounce off edges
-	var size = get_viewport_rect().size
-	if blob_pos.x < 0 or blob_pos.x > size.x:
-		blob_dir.x *= -1
-	if blob_pos.y < 0 or blob_pos.y > size.y:
-		blob_dir.y *= -1
-
-	# kill by body contact
-	for org in organisms:
-		if org["dead"]:
-			continue
-		if blob_pos.distance_to(org["pos"]) < blob_radius + org["radius"]:
-			org["dead"] = true
-			explosions.append({"pos": org["pos"], "color": org["color"], "frame": 0})
-
-	# spawn blob tentacles
-	if randi() % 6 == 0:
-		var angle = randf() * TAU
-		var dir = Vector2(cos(angle), sin(angle))
-		blob_tentacles.append({
-			"start": blob_pos,
-			"tip": blob_pos + dir * 5.0,
-			"dir": dir,
-			"length": 1.0,
-			"alive": true
-		})
-
-
-# ---------------------------------------------------------
-# BLOB TENTACLE UPDATE
-# ---------------------------------------------------------
-func _update_blob_tentacles():
-	for t in blob_tentacles:
-		if not t["alive"]:
-			continue
-
-		t["tip"] += t["dir"] * 18.2
-		t["length"] += 15.2
-
-		t["dir"] = (t["dir"] + Vector2(
-			randf_range(-0.05, 0.05),
-			randf_range(-0.05, 0.05)
-		)).normalized()
-
-		var size = get_viewport_rect().size
-		if t["tip"].x < 0 or t["tip"].x > size.x:
-			t["dir"].x *= -1
-		if t["tip"].y < 0 or t["tip"].y > size.y:
-			t["dir"].y *= -1
-
-		for org in organisms:
-			if org["dead"]:
-				continue
-			if t["tip"].distance_to(org["pos"]) < org["radius"]:
-				org["dead"] = true
-				explosions.append({"pos": org["pos"], "color": org["color"], "frame": 0})
-
-		if t["length"] > 220:
-			t["alive"] = false
-
-
-# ---------------------------------------------------------
-# ORGANISM TENTACLE UPDATE
+# ORGANISM TENTACLE UPDATE (FADE + CHILD FIX)
 # ---------------------------------------------------------
 func _update_tentacles():
 	for org in organisms:
 		if org["dead"]:
 			continue
 
+		# spawn tentacle
 		if org["tentacles"].size() < MAX_TENTACLES_PER_ORG and randi() % 30 == 0:
 			var angle = randf() * TAU
 			var dir = Vector2(cos(angle), sin(angle))
@@ -192,33 +116,40 @@ func _update_tentacles():
 				"tip": org["pos"] + dir * 5.0,
 				"dir": dir,
 				"length": 5.0,
-				"alive": true
+				"alive": true,
+				"fade": 1.0
 			})
 
 		for t in org["tentacles"]:
-			if not t["alive"]:
-				continue
 
-			var speed = TENTACLE_SPEED * org["growth"]
-			t["tip"] += t["dir"] * speed
-			t["length"] += speed
+			# ACTIVE tentacle
+			if t["alive"]:
+				var speed = TENTACLE_SPEED * org["growth"]
+				t["tip"] += t["dir"] * speed
+				t["length"] += speed
 
-			t["dir"] = (t["dir"] + Vector2(
-				randf_range(-0.05, 0.05),
-				randf_range(-0.05, 0.05)
-			)).normalized()
+				t["dir"] = (t["dir"] + Vector2(
+					randf_range(-0.05, 0.05),
+					randf_range(-0.05, 0.05)
+				)).normalized()
 
-			var size = get_viewport_rect().size
-			if t["tip"].x < 0 or t["tip"].x > size.x:
-				t["dir"].x *= -1
-			if t["tip"].y < 0 or t["tip"].y > size.y:
-				t["dir"].y *= -1
+				var size = get_viewport_rect().size
+				if t["tip"].x < 0 or t["tip"].x > size.x:
+					t["dir"].x *= -1
+				if t["tip"].y < 0 or t["tip"].y > size.y:
+					t["dir"].y *= -1
 
-			_check_collisions(org, t)
+				_check_collisions(org, t)
 
-			if t["length"] > MAX_TENTACLE_LENGTH:
-				_spawn_child(org, t["tip"])
-				t["alive"] = false
+				# CHILD SPAWN FIX — spawn BEFORE fade
+				if t["length"] > MAX_TENTACLE_LENGTH:
+					_spawn_child(org, t["tip"])
+					t["alive"] = false
+					t["fade"] = 1.0
+
+			# DEAD tentacle (fade mode)
+			else:
+				t["fade"] -= 0.005   # smooth fade
 
 
 # ---------------------------------------------------------
@@ -245,6 +176,7 @@ func _check_collisions(org, tentacle):
 				continue
 			if tip.distance_to(et["tip"]) < TIP_COLLISION_RADIUS:
 				et["alive"] = false
+				et["fade"] = 1.0
 				explosions.append({"pos": et["tip"], "color": org["color"], "frame": 0})
 				return
 
@@ -259,7 +191,7 @@ func _spawn_child(parent, pos):
 	organisms.append({
 		"pos": pos,
 		"color": parent["color"],
-		"radius": 12.0,
+		"radius": 18.0,
 		"growth": parent["growth"] * randf_range(0.9, 1.1),
 		"team": parent["team"],
 		"tentacles": [],
@@ -281,11 +213,13 @@ func _update_explosions():
 
 
 # ---------------------------------------------------------
-# CLEANUP
+# CLEANUP (FADE SUPPORT)
 # ---------------------------------------------------------
 func _cleanup():
 	for org in organisms:
-		org["tentacles"] = org["tentacles"].filter(func(t): return t["alive"])
+		org["tentacles"] = org["tentacles"].filter(func(t):
+			return t["fade"] > 0.0
+		)
 
 	organisms = organisms.filter(func(o): return not o["dead"])
 
@@ -298,32 +232,7 @@ func _cleanup():
 func _draw():
 	draw_rect(Rect2(Vector2.ZERO, get_viewport_rect().size), Color.BLACK, true)
 
-	draw_circle(blob_pos, blob_radius, Color(0.967, 0.0, 0.0, 1.0))
-
-	for t in blob_tentacles:
-		if not t["alive"]:
-			continue
-
-		var start = t["start"]
-		var tip = t["tip"]
-
-		var segments = 12
-		var points = []
-
-		for i in range(segments + 1):
-			var tpos = float(i) / segments
-			var pos = start.lerp(tip, tpos)
-
-			var wiggle = sin((tpos * 8.0) + frame * 0.1) * 6.0
-
-			var dir = (tip - start).normalized()
-			var perp = Vector2(-dir.y, dir.x)
-
-			points.append(pos + perp * wiggle)
-
-		for i in range(points.size() - 1):
-			draw_line(points[i], points[i+1], Color(1,0,0) * 1.8, 2.0)
-
+	# explosions
 	for e in explosions:
 		var t = e["frame"] / 20.0
 		var radius = lerp(5, 40, t)
@@ -333,14 +242,13 @@ func _draw():
 		draw_circle(e["pos"], radius, col)
 		draw_circle(e["pos"], radius * 0.4, Color(1,1,1,alpha * 0.6))
 
+	# organisms
 	for org in organisms:
 		draw_circle(org["pos"], org["radius"], org["color"])
 
+	# tentacles (FADE)
 	for org in organisms:
 		for t in org["tentacles"]:
-			if not t["alive"]:
-				continue
-
 			var start = t["start"]
 			var tip = t["tip"]
 
@@ -358,5 +266,8 @@ func _draw():
 
 				points.append(pos + perp * wiggle)
 
+			var alpha = clamp(t["fade"], 0.0, 1.0)
+			var col = Color(org["color"].r, org["color"].g, org["color"].b, alpha)
+
 			for i in range(points.size() - 1):
-				draw_line(points[i], points[i+1], org["color"] * 1.8, 2.0)
+				draw_line(points[i], points[i+1], col, 6.0)
